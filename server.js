@@ -15,16 +15,24 @@ const server = app.listen(PORT, () => {
     console.log(`Matching Server running on port ${PORT}`);
 });
 
-// PeerJS 시그널링 서버 생성
+// PeerJS 시그널링 서버 생성 (경로 문제 해결)
 const peerServer = ExpressPeerServer(server, {
     debug: true,
-    path: '/myapp'
+    path: '/'
 });
 
 app.use('/peerjs', peerServer);
 
 // 선착순 매칭 대기열
 let waitingPeerId = null;
+
+// 플레이어가 대기 중 창을 닫거나 나가면 대기열에서 지우기 (유령 접속 방지)
+peerServer.on('disconnect', (client) => {
+    if (waitingPeerId === client.getId()) {
+        console.log(`대기 중인 유저 나감: ${client.getId()}`);
+        waitingPeerId = null;
+    }
+});
 
 app.get('/match', (req, res) => {
     const myId = req.query.id;
