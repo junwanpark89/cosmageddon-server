@@ -1,43 +1,51 @@
 const express = require('express');
-const http = require('http');
 const { ExpressPeerServer } = require('peer');
-const cors = require('cors');
 
 const app = express();
-app.use(cors()); // CORS 전면 허용
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-const server = http.createServer(app);
+// CORS 허용 (게임 브라우저 통신용)
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    next();
+});
 
-// PeerJS 서버 마운트
+const server = app.listen(PORT, () => {
+    console.log(`Matching Server running on port ${PORT}`);
+});
+
+// PeerJS 시그널링 서버 생성 (경로 문제 해결)
 const peerServer = ExpressPeerServer(server, {
     debug: true,
-    path: '/peerjs'
+    path: '/'
 });
 
 app.use('/peerjs', peerServer);
 
-// 큐 기반 매칭 시스템
-let waitingHostId = null;
+// 선착순 매칭 대기열
+let waitingPeerId = null;
 
-app.post('/api/matchmaking', (req, res) => {
-    const { peerId } = req.body;
-    
-    if (!peerId) {
-        return res.status(400).json({ error: "peerId is required" });
-    }
-
-    if (!waitingHostId || waitingHostId === peerId) {
-        waitingHostId = peerId;
-        return res.json({ role: 'host' });
-    } else {
-        const hostId = waitingHostId;
-        waitingHostId = null; // 매칭 성공 시 큐 비우기
-        return res.json({ role: 'guest', hostId: hostId });
+// 플레이어가 대기 중 창을 닫거나 나가면 대기열에서 지우기 (유령 접속 방지)
+peerServer.on('disconnect', (client) => {
+    if (waitingPeerId === client.getId()) {
+        console.log(`대기 중인 유저 나감: ${client.getId()}`);
+        waitingPeerId = null;
     }
 });
 
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+app.get('/match', (req, res) => {
+    const myId = req.query.id;
+    if (!myId) return res.status(400).json({ error: "No ID provided" });
+
+    if (waitingPeerId && waitingPeerId !== myId) {
+        // 먼저 온 사람(waitingPeerId)과 방금 온 사람(myId) 매칭!
+        const opponentId = waitingPeerId;
+        waitingPeerId = null; // 대기열 비우기
+        res.json({ status: "matched", opponentId: opponentId, isHost: false });
+    } else {
+        // 내가 첫 번째 대기자
+        waitingPeerId = myId;
+        res.json({ status: "waiting", isHost: true });
+    }
 });
