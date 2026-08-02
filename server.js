@@ -1,51 +1,50 @@
 const express = require('express');
 const { ExpressPeerServer } = require('peer');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors());
+app.use(express.json());
 
-// CORS 허용 (게임 브라우저 통신용)
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    next();
-});
+const server = app.listen(process.env.PORT || 443);
 
-const server = app.listen(PORT, () => {
-    console.log(`Matching Server running on port ${PORT}`);
-});
-
-// PeerJS 시그널링 서버 생성 (경로 문제 해결)
+// PeerJS 서버 설정
 const peerServer = ExpressPeerServer(server, {
     debug: true,
-    path: '/'
+    path: '/peerjs'
 });
-
 app.use('/peerjs', peerServer);
 
-// 선착순 매칭 대기열
-let waitingPeerId = null;
+// ----------------------------------------------------
+// 🎯 Quick Match (무작위 순서 매칭) 대기열 로직
+// ----------------------------------------------------
+let waitingHostId = null;
 
-// 플레이어가 대기 중 창을 닫거나 나가면 대기열에서 지우기 (유령 접속 방지)
-peerServer.on('disconnect', (client) => {
-    if (waitingPeerId === client.getId()) {
-        console.log(`대기 중인 유저 나감: ${client.getId()}`);
-        waitingPeerId = null;
+app.post('/api/matchmaking', (req, res) => {
+    const { peerId } = req.body;
+
+    // 만약 기존 대기 중인 Host가 나가서 무효화되었거나 자기 자신인 경우 리셋
+    if (waitingHostId === peerId) {
+        return res.json({ status: 'WAITING', hostId: peerId });
+    }
+
+    if (waitingHostId) {
+        // 1. 이미 기다리고 있는 유저가 있다면 -> 해당 유저와 매칭!
+        const matchedHostId = waitingHostId;
+        waitingHostId = null; // 대기열 비우기
+        return res.json({ status: 'MATCHED', role: 'guest', hostId: matchedHostId });
+    } else {
+        // 2. 기다리는 유저가 없다면 -> 내가 대기자(Host)가 됨
+        waitingHostId = peerId;
+        return res.json({ status: 'WAITING', role: 'host', hostId: peerId });
     }
 });
 
-app.get('/match', (req, res) => {
-    const myId = req.query.id;
-    if (!myId) return res.status(400).json({ error: "No ID provided" });
-
-    if (waitingPeerId && waitingPeerId !== myId) {
-        // 먼저 온 사람(waitingPeerId)과 방금 온 사람(myId) 매칭!
-        const opponentId = waitingPeerId;
-        waitingPeerId = null; // 대기열 비우기
-        res.json({ status: "matched", opponentId: opponentId, isHost: false });
-    } else {
-        // 내가 첫 번째 대기자
-        waitingPeerId = myId;
-        res.json({ status: "waiting", isHost: true });
+// 연결이 끊기거나 취소할 때 대기열 비우기
+app.post('/api/cancel-matchmaking', (req, res) => {
+    const { peerId } = req.body;
+    if (waitingHostId === peerId) {
+        waitingHostId = null;
     }
+    res.json({ success: true });
 });
