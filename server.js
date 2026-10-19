@@ -23,8 +23,7 @@ const peerServer = ExpressPeerServer(server, {
 
 app.use('/peerjs', peerServer);
 
-// 💡 [변경 1] 대기열과 매칭된 상태를 관리할 변수
-// 기존에는 단순히 id만 담는 배열이었으나, 이제 rating과 timestamp를 함께 관리합니다.
+// 대기열 및 매칭된 상태 관리 변수
 let waitingQueue = [];
 let activeMatches = {}; 
 
@@ -32,11 +31,11 @@ let activeMatches = {};
 peerServer.on('disconnect', (client) => {
     const disconnectedId = client.getId();
     waitingQueue = waitingQueue.filter(p => p.id !== disconnectedId);
-    delete activeMatches[disconnectedId]; // 매칭 상태에서도 제거
+    delete activeMatches[disconnectedId];
     console.log(`유저 접속 해제 (대기열 정리 완료): ${disconnectedId}`);
 });
 
-// 매칭 요청 API (💡 [변경 2] 레이팅 기반 매칭 알고리즘 적용)
+// 매칭 요청 API (레이팅 기반 매칭 알고리즘 적용)
 app.get('/match', (req, res) => {
     const myId = req.query.id;
     const myRating = parseInt(req.query.rating) || 1000;
